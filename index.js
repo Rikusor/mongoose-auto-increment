@@ -4,6 +4,21 @@ extend = require('extend'),
 counterSchema,
 IdentityCounter;
 
+Object.byString = function(o, s) {
+  s = s.replace(/\[(\w+)\]/g, '.$1'); // convert indexes to properties
+  s = s.replace(/^\./, '');           // strip a leading dot
+  var a = s.split('.');
+  for (var i = 0, n = a.length; i < n; ++i) {
+    var k = a[i];
+    if (k in o) {
+      o = o[k];
+    } else {
+      return;
+    }
+  }
+  return o;
+}
+
 // Initialize plugin by creating counter collection in database.
 exports.initialize = function (connection) {
   try {
@@ -123,6 +138,7 @@ exports.plugin = function (schema, options) {
 
     // Only do this if it is a new document (see http://mongoosejs.com/docs/api.html#document_Document-isNew)
     if (doc.isNew) {
+      var docKey = Object.byString(doc, settings.field)
       // Declare self-invoking save function.
       (function save() {
         // If ready, run increment logic.
@@ -131,13 +147,14 @@ exports.plugin = function (schema, options) {
         if (ready) {
           // check that a number has already been provided, and update the counter to that number if it is
           // greater than the current count
-          if (typeof doc[settings.field] === 'number') {
+
+          if (typeof docKey === 'number') {
             IdentityCounter.findOneAndUpdate(
               // IdentityCounter documents are identified by the model and field that the plugin was invoked for.
               // Check also that count is less than field value.
-              { model: settings.model, field: settings.field, count: { $lt: doc[settings.field] } },
+              { model: settings.model, field: settings.field, count: { $lt: docKey } },
               // Change the count of the value found to the new field value.
-              { count: doc[settings.field] },
+              { count: docKey },
               function (err) {
                 if (err) return next(err);
                 // Continue with default document save functionality.
@@ -157,7 +174,7 @@ exports.plugin = function (schema, options) {
               function (err, updatedIdentityCounter) {
                 if (err) return next(err);
                 // If there are no errors then go ahead and set the document's field to the current count.
-                doc[settings.field] = updatedIdentityCounter.count;
+                docKey = updatedIdentityCounter.count;
                 // Continue with default document save functionality.
                 next();
               }
