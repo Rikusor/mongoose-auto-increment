@@ -1,23 +1,8 @@
 // Module Scope
 var mongoose = require('mongoose'),
-extend = require('extend'),
-counterSchema,
-IdentityCounter;
-
-Object.byString = function(o, s) {
-  s = s.replace(/\[(\w+)\]/g, '.$1'); // convert indexes to properties
-  s = s.replace(/^\./, '');           // strip a leading dot
-  var a = s.split('.');
-  for (var i = 0, n = a.length; i < n; ++i) {
-    var k = a[i];
-    if (k in o) {
-      o = o[k];
-    } else {
-      return;
-    }
-  }
-  return o;
-}
+  extend = require('extend'),
+  counterSchema,
+  IdentityCounter;
 
 // Initialize plugin by creating counter collection in database.
 exports.initialize = function (connection) {
@@ -45,6 +30,13 @@ exports.initialize = function (connection) {
 
 // The function to use when invoking the plugin on a custom schema.
 exports.plugin = function (schema, options) {
+  const resolvePath = (object, path, defaultValue) => path
+    .split('.')
+    .reduce((o, p) => o ? o[p] : defaultValue, object)
+
+  const setPath = (object, path, value) => path
+    .split('.')
+    .reduce((o,p) => o[p] = path.split('.').pop() === p ? value : o[p] || {}, object)
 
   // If we don't have reference to the counterSchema or the IdentityCounter model then the plugin was most likely not
   // initialized properly so throw an error.
@@ -52,24 +44,24 @@ exports.plugin = function (schema, options) {
 
   // Default settings and plugin scope variables.
   var settings = {
-    model: null, // The model to configure the plugin for.
-    field: '_id', // The field the plugin should track.
-    startAt: 0, // The number the count should start at.
-    incrementBy: 1, // The number by which to increment the count each time.
-    unique: true // Should we create a unique index for the field
-  },
-  fields = {}, // A hash of fields to add properties to in Mongoose.
-  ready = false; // True if the counter collection has been updated and the document is ready to be saved.
+      model: null, // The model to configure the plugin for.
+      field: '_id', // The field the plugin should track.
+      startAt: 0, // The number the count should start at.
+      incrementBy: 1, // The number by which to increment the count each time.
+      unique: true // Should we create a unique index for the field
+    },
+    fields = {}, // A hash of fields to add properties to in Mongoose.
+    ready = false; // True if the counter collection has been updated and the document is ready to be saved.
 
   switch (typeof(options)) {
     // If string, the user chose to pass in just the model name.
     case 'string':
       settings.model = options;
-    break;
+      break;
     // If object, the user passed in a hash of options.
     case 'object':
       extend(settings, options);
-    break;
+      break;
   }
 
   if (settings.model == null)
@@ -133,12 +125,12 @@ exports.plugin = function (schema, options) {
 
   // Every time documents in this schema are saved, run this logic.
   schema.pre('save', function (next) {
+
     // Get reference to the document being saved.
     var doc = this;
 
     // Only do this if it is a new document (see http://mongoosejs.com/docs/api.html#document_Document-isNew)
     if (doc.isNew) {
-      var docKey = Object.byString(doc, settings.field)
       // Declare self-invoking save function.
       (function save() {
         // If ready, run increment logic.
@@ -148,13 +140,13 @@ exports.plugin = function (schema, options) {
           // check that a number has already been provided, and update the counter to that number if it is
           // greater than the current count
 
-          if (typeof docKey === 'number') {
+          if (typeof doc.contract.extraInfo === 'number') {
             IdentityCounter.findOneAndUpdate(
               // IdentityCounter documents are identified by the model and field that the plugin was invoked for.
               // Check also that count is less than field value.
-              { model: settings.model, field: settings.field, count: { $lt: docKey } },
+              { model: settings.model, field: settings.field, count: { $lt: doc.contract.extraInfo } },
               // Change the count of the value found to the new field value.
-              { count: docKey },
+              { count: doc.contract.extraInfo },
               function (err) {
                 if (err) return next(err);
                 // Continue with default document save functionality.
@@ -174,7 +166,7 @@ exports.plugin = function (schema, options) {
               function (err, updatedIdentityCounter) {
                 if (err) return next(err);
                 // If there are no errors then go ahead and set the document's field to the current count.
-                docKey = updatedIdentityCounter.count;
+                doc.contract.extraInfo = updatedIdentityCounter.count;
                 // Continue with default document save functionality.
                 next();
               }
